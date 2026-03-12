@@ -98,6 +98,25 @@ def cluster_status_styled(status: str) -> str:
     return f"[{color}]{status_upper}[/{color}]"
 
 
+# ──────────────────── Timeframe ───────────────────────────────
+
+def timeframe_to_minutes(tf: str) -> int:
+    """
+    Convert a timeframe string (e.g. '30m', '2h', '7d') to total minutes.
+    Returns 60 (1h) as the default fallback.
+    """
+    m = re.fullmatch(r"(\d+)([mhd])", tf.strip().lower())
+    if not m:
+        return 60
+    n, unit = int(m.group(1)), m.group(2)
+    if unit == "m":
+        return n
+    elif unit == "h":
+        return n * 60
+    else:  # d
+        return n * 1440
+
+
 # ──────────────────── Interaction ──────────────────────────────
 
 def press_enter_to_return():

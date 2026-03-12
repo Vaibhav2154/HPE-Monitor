@@ -14,7 +14,7 @@ from monitor.client import fetch_cluster_health
 from monitor.utils import cluster_status_styled, cluster_status_symbol
 
 
-def display_cluster_health():
+def display_cluster_health(timeframe: str = "1h"):
     """Render the Cluster Health view."""
     console.print()
     console.rule("[bold cyan]OpenSearch — Cluster Health[/bold cyan]")

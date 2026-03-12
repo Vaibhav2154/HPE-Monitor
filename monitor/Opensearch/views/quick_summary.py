@@ -24,7 +24,7 @@ from monitor.client import (
 from monitor.utils import format_bytes, parse_size_string, status_symbol, cluster_status_symbol, cluster_status_styled
 
 
-def display_quick_summary():
+def display_quick_summary(timeframe: str = "1h"):
     """Render the Quick Summary view."""
     now = datetime.datetime.now().strftime("%H:%M")
 
@@ -161,10 +161,11 @@ def display_quick_summary():
     # ── Index Activity ────────────────────────────────────────────────
     indices = fetch_indices()
 
-    # Doc count and indexing ops re-use the already-fetched cluster_stats (no extra API call)
+    # Doc count, indexing ops, and search queries re-use the already-fetched cluster_stats (no extra API call)
     cs_indices = cluster_stats.get("indices", {}) if cluster_stats else {}
     total_docs = cs_indices.get("docs", {}).get("count", 0)
     index_ops_total = cs_indices.get("indexing", {}).get("index_total", 0)
+    query_ops_total = cs_indices.get("search", {}).get("query_total", 0)
 
     if indices:
         total_indices = len(indices)
@@ -178,6 +179,7 @@ def display_quick_summary():
             f"  Total documents: {total_docs:,}\n"
             f"  Total data     : {format_bytes(total_data)}\n"
             f"  Indexing ops   : {index_ops_total:,}  [dim](cumulative — 0 means idle / no active writes)[/dim]\n"
+            f"  Search queries : {query_ops_total:,}  [dim](cumulative — 0 means no queries have run)[/dim]\n"
             f"  Largest index  : {largest_name} ({largest_size})",
             title="[bold]Index Activity[/bold]",
             title_align="left",

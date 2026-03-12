@@ -14,7 +14,7 @@ from monitor.client import fetch_indices, fetch_shards
 from monitor.utils import format_bytes, parse_size_string
 
 
-def display_index_deep_dive():
+def display_index_deep_dive(timeframe: str = "1h"):
     """Render the Index Deep Dive view."""
     console.print()
     console.rule("[bold cyan]OpenSearch — Index Deep Dive[/bold cyan]")

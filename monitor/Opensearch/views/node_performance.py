@@ -15,18 +15,17 @@ from monitor.config import (
     HEAP_WARN, HEAP_CRIT,
     DISK_WARN, DISK_CRIT,
 )
-from monitor.client import fetch_node_stats, fetch_disk_allocation
+from monitor.client import fetch_node_stats
 from monitor.utils import format_bytes, parse_size_string, status_symbol, status_color
 
 
-def display_node_performance():
+def display_node_performance(timeframe: str = "1h"):
     """Render the Node Performance view."""
     console.print()
     console.rule("[bold cyan]OpenSearch — Node Performance[/bold cyan]")
     console.print()
 
     node_stats = fetch_node_stats()
-    disk_alloc = fetch_disk_allocation()
 
     if not node_stats or "nodes" not in node_stats:
         console.print("[red]Could not retrieve node stats.[/red]")
@@ -34,13 +33,6 @@ def display_node_performance():
 
     # Build a disk lookup by node name
     disk_by_node = {}
-    if disk_alloc:
-        for entry in disk_alloc:
-            node_name = entry.get("node", "unknown")
-            disk_by_node[node_name] = {
-                "used": parse_size_string(entry.get("disk.used", "0")),
-                "total": parse_size_string(entry.get("disk.total", "0")),
-            }
 
     # ── Build Table ───────────────────────────────────────────
     table = Table(
@@ -55,10 +47,11 @@ def display_node_performance():
     table.add_column("JVM Heap", width=22, justify="right")
     table.add_column("", width=3, justify="center")  # Heap status
     table.add_column("System RAM", width=22, justify="right")
-    table.add_column("Disk", width=22, justify="right")
+    table.add_column("Disk (fs.total)", width=22, justify="right")
     table.add_column("", width=3, justify="center")  # Disk status
 
     issues = []
+    indexing_details = []
 
     for node_id, node in node_stats["nodes"].items():
         os_info = node.get("os", {})
@@ -85,16 +78,22 @@ def display_node_performance():
         mem_total = mem_info.get("total_in_bytes", 0)
         mem_str = f"[dim]{format_bytes(mem_used)} / {format_bytes(mem_total)}[/dim]"
 
-        # Disk
-        disk_info = disk_by_node.get(node_name, {})
-        disk_used = disk_info.get("used", 0)
-        disk_total = disk_info.get("total", 0)
+        # Disk — use fs.total from node stats for exact watermark-accurate bytes
+        fs_total_info = node.get("fs", {}).get("total", {})
+        disk_total = fs_total_info.get("total_in_bytes", 0)
+        disk_avail = fs_total_info.get("available_in_bytes", 0)
+        disk_used = disk_total - disk_avail
         disk_pct = (disk_used / disk_total * 100) if disk_total > 0 else 0
         disk_col = status_color(disk_pct, DISK_WARN, DISK_CRIT)
         disk_sym = status_symbol(disk_pct, DISK_WARN, DISK_CRIT)
         disk_str = f"[{disk_col}]{format_bytes(disk_used)} / {format_bytes(disk_total)}[/{disk_col}]"
 
         table.add_row(node_name, cpu_str, cpu_sym, heap_str, heap_sym, mem_str, disk_str, disk_sym)
+
+        # Per-node indexing and search stats
+        node_indices = node.get("indices", {})
+        index_total = node_indices.get("indexing", {}).get("index_total", 0)
+        query_total = node_indices.get("search", {}).get("query_total", 0)
 
         # Collect issues for summary
         if cpu_pct >= CPU_CRIT:
@@ -112,7 +111,36 @@ def display_node_performance():
         elif disk_pct >= DISK_WARN:
             issues.append(f"[yellow]⚠[/yellow]  {node_name} — disk getting full ({disk_pct:.0f}%)")
 
+        indexing_details.append((node_name, index_total, query_total))
+
     console.print(table)
+    console.print()
+
+    # ── Indexing & Search Activity (per node) ────────────────────────
+    act_table = Table(
+        box=box.SIMPLE,
+        show_header=True,
+        header_style="bold cyan",
+        expand=True,
+    )
+    act_table.add_column("Node",          style="bold white", ratio=1)
+    act_table.add_column("Indexing Ops",  width=18, justify="right",
+                         style="cyan",  header_style="bold cyan")
+    act_table.add_column("Search Queries", width=18, justify="right",
+                         style="magenta", header_style="bold magenta")
+
+    for node_name, idx_ops, srch_ops in indexing_details:
+        idx_str  = f"{idx_ops:,}"  if idx_ops  else "[dim]0[/dim]"
+        srch_str = f"{srch_ops:,}" if srch_ops else "[dim]0[/dim]"
+        act_table.add_row(node_name, idx_str, srch_str)
+
+    console.print(Panel(
+        act_table,
+        title="[bold]Indexing & Search Activity[/bold]  [dim](cumulative totals)[/dim]",
+        title_align="left",
+        border_style="cyan",
+        expand=True,
+    ))
     console.print()
 
     # ── Summary ───────────────────────────────────────────────

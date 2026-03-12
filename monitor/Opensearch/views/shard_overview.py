@@ -14,7 +14,7 @@ from monitor.client import fetch_shards
 from monitor.utils import format_bytes, parse_size_string
 
 
-def display_shard_overview():
+def display_shard_overview(timeframe: str = "1h"):
     """Render the Shard Overview view."""
     console.print()
     console.rule("[bold cyan]OpenSearch — Shard Overview[/bold cyan]")

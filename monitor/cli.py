@@ -11,6 +11,7 @@ Uses click for flag parsing:
 import sys
 import time
 import datetime
+import re
 
 import click
 
@@ -23,9 +24,9 @@ from monitor.utils import press_enter_to_return
 @click.command()
 @click.option(
     "--timeframe",
-    type=click.Choice(["1h", "6h", "24h", "7d"], case_sensitive=False),
     default="1h",
-    help="Time window for views that support time-windowed data.",
+    show_default=True,
+    help="Time window for views that support filtering (e.g. 30m, 6h, 2d). Default: 1h.",
 )
 @click.option(
     "--watch",
@@ -47,6 +48,16 @@ from monitor.utils import press_enter_to_return
 )
 def cli(timeframe, watch, summary, service):
     """OpenSearch Cluster Monitor — a terminal-based health checker."""
+
+    # Validate --timeframe format (number + m/h/d)
+    if not re.fullmatch(r"\d+[mhd]", timeframe, re.IGNORECASE):
+        raise click.BadParameter(
+            f"'{timeframe}' is not a valid timeframe. "
+            "Use a number followed by m (minutes), h (hours), or d (days). "
+            "Examples: 30m, 6h, 24h, 7d",
+            param_hint="'--timeframe'",
+        )
+    timeframe = timeframe.lower()
 
     # Handle coming-soon services
     if service in ("kafka", "logstash"):
