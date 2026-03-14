@@ -6,16 +6,18 @@ Prometheus-backed trend view for CPU, JVM heap, and indexing rate.
 
 from __future__ import annotations
 
-from rich import box
+from datetime import datetime
+
 from rich.panel import Panel
-from rich.table import Table
 
 from monitor.config import CPU_WARN, CPU_CRIT, console
 from monitor.metrics_service import TrendSeries, fetch_historical_trends
 from monitor.utils import format_bytes, is_realtime_timeframe, timeframe_to_prometheus_range
 
-_SPARK_BLOCKS = " ▁▂▃▄▅▆▇█"
-_DEFAULT_SPARK_WIDTH = 68
+_BAR_CHAR = "█"
+_EMPTY_CHAR = " "
+_DEFAULT_CHART_WIDTH = 60
+_DEFAULT_CHART_HEIGHT = 10
 _METRIC_COLORS = {
     "cpu": "bright_yellow",
     "heap": "bright_green",
@@ -23,43 +25,35 @@ _METRIC_COLORS = {
 }
 
 
-def _downsample(values: list[float], width: int) -> list[float]:
-    """Downsample a list to the target width while preserving the overall shape."""
-    if not values:
+def _downsample_indices(length: int, width: int) -> list[int]:
+    """Return source indices for downsampling while preserving trend shape."""
+    if length <= 0:
         return []
-    if len(values) <= width:
-        return values
+    if length <= width:
+        return list(range(length))
 
-    step = (len(values) - 1) / (width - 1)
-    return [values[round(i * step)] for i in range(width)]
-
-
-def _sparkline(values: list[float], width: int = 42) -> str:
-    """Render a compact unicode sparkline string."""
-    if not values:
-        return "[dim]no data[/dim]"
-
-    reduced = _downsample(values, width=width)
-    lo = min(reduced)
-    hi = max(reduced)
-
-    if hi == lo:
-        return _SPARK_BLOCKS[-1] * len(reduced)
-
-    scale = (len(_SPARK_BLOCKS) - 1) / (hi - lo)
-    blocks = []
-    for value in reduced:
-        idx = int((value - lo) * scale)
-        idx = max(0, min(idx, len(_SPARK_BLOCKS) - 1))
-        blocks.append(_SPARK_BLOCKS[idx])
-    return "".join(blocks)
+    step = (length - 1) / (width - 1)
+    return [round(i * step) for i in range(width)]
 
 
-def _sparkline_width() -> int:
-    """Pick a wider chart width that adapts to terminal size."""
-    # Reserve room for table borders and side columns while maximizing trend width.
+def _chart_width() -> int:
+    """Pick a wide chart width that still fits narrow terminals."""
     terminal_width = getattr(console, "width", 120) or 120
-    return max(56, min(_DEFAULT_SPARK_WIDTH, terminal_width - 58))
+    # Keep room for y-axis labels and panel framing.
+    return max(36, min(_DEFAULT_CHART_WIDTH, terminal_width - 28))
+
+
+def _downsample_series(series: TrendSeries, width: int) -> tuple[list[float], list[int]]:
+    """Downsample values and timestamps together using identical sample points."""
+    indices = _downsample_indices(len(series.values), width)
+    reduced_values = [series.values[i] for i in indices]
+
+    if series.timestamps and len(series.timestamps) == len(series.values):
+        reduced_timestamps = [series.timestamps[i] for i in indices]
+    else:
+        reduced_timestamps = []
+
+    return reduced_values, reduced_timestamps
 
 
 def _format_metric_value(series: TrendSeries, value: float) -> str:
@@ -81,19 +75,78 @@ def _format_metric_value(series: TrendSeries, value: float) -> str:
     return f"{value:.2f}"
 
 
-def _trend_cell(metric_key: str, series: TrendSeries, width: int) -> str:
-    """Render a larger sparkline plus min/max labels for easier scanning."""
+def _format_timestamp(ts: int) -> str:
+    """Render a compact local time label for x-axis markers."""
+    try:
+        return datetime.fromtimestamp(ts).strftime("%H:%M")
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
+def _vertical_chart(metric_key: str, series: TrendSeries, width: int, height: int = _DEFAULT_CHART_HEIGHT) -> str:
+    """Render a vertical bar chart with y-axis labels and time direction."""
     if not series.values:
         return "[dim]no data[/dim]"
 
-    spark = _sparkline(series.values, width=width)
+    reduced_values, reduced_timestamps = _downsample_series(series, width=width)
+    if not reduced_values:
+        return "[dim]no data[/dim]"
+
+    lo = min(reduced_values)
+    hi = max(reduced_values)
+    span = hi - lo
+
+    if span <= 0:
+        levels = [height] * len(reduced_values)
+    else:
+        levels = [int(round(((value - lo) / span) * height)) for value in reduced_values]
+
     color = _METRIC_COLORS.get(metric_key, "white")
-    floor = _format_metric_value(series, min(series.values))
-    peak = _format_metric_value(series, max(series.values))
-    return (
-        f"[{color}]{spark}[/{color}]\n"
-        f"[dim]min {floor}  |  max {peak}[/dim]"
-    )
+    y_top = _format_metric_value(series, hi)
+    y_bottom = _format_metric_value(series, lo)
+    y_mid = _format_metric_value(series, lo + (span / 2 if span > 0 else 0.0))
+    label_width = max(len(y_top), len(y_mid), len(y_bottom), 6)
+
+    tick_rows = {
+        height,
+        max(1, int(round(height * 0.75))),
+        max(1, int(round(height * 0.50))),
+        max(1, int(round(height * 0.25))),
+        1,
+    }
+
+    lines: list[str] = []
+    for row in range(height, 0, -1):
+        if span > 0:
+            axis_value = lo + (span * row / height)
+        else:
+            axis_value = hi
+        axis_label = _format_metric_value(series, axis_value)
+        prefix = f"{axis_label:>{label_width}} | " if row in tick_rows else f"{'':>{label_width}} | "
+
+        bars = "".join(
+            _BAR_CHAR if level >= row else _EMPTY_CHAR
+            for level in levels
+        )
+        lines.append(f"[dim]{prefix}[/dim][{color}]{bars}[/{color}]")
+
+    lines.append(f"[dim]{'':>{label_width}} +{'-' * len(levels)}[/dim]")
+
+    start_ts = _format_timestamp(reduced_timestamps[0]) if len(reduced_timestamps) >= 1 else ""
+    end_ts = _format_timestamp(reduced_timestamps[-1]) if len(reduced_timestamps) >= 2 else ""
+    if start_ts and end_ts:
+        gap = max(1, len(levels) - len(start_ts) - len(end_ts))
+        lines.append(f"[dim]{'':>{label_width}}  {start_ts}{' ' * gap}{end_ts}[/dim]")
+    lines.append(f"[dim]{'':>{label_width}}  older -> newer[/dim]")
+
+    return "\n".join(lines)
+
+
+def _series_average(series: TrendSeries) -> float:
+    """Return the arithmetic mean of a series."""
+    if not series.values:
+        return 0.0
+    return sum(series.values) / len(series.values)
 
 
 def _metric_readout(metric_key: str, series: TrendSeries) -> str:
@@ -167,21 +220,7 @@ def display_trends(timeframe: str = "1h"):
     ))
     console.print()
 
-    # Drill-down detail
-    spark_width = _sparkline_width()
-    table = Table(
-        box=box.ROUNDED,
-        show_header=True,
-        show_lines=True,
-        header_style="bold cyan",
-        padding=(1, 1),
-        expand=True,
-    )
-    table.add_column("Metric", style="bold white", width=16)
-    table.add_column("Trend (Historical)", ratio=4)
-    table.add_column("Latest", width=12, justify="right")
-    table.add_column("Peak", width=12, justify="right")
-    table.add_column("Readout", ratio=2)
+    chart_width = _chart_width()
 
     for metric_key, series in (
         ("cpu", cpu_series),
@@ -190,13 +229,23 @@ def display_trends(timeframe: str = "1h"):
     ):
         latest = _format_metric_value(series, series.latest) if series.values else "—"
         peak = _format_metric_value(series, series.peak) if series.values else "—"
-        table.add_row(
-            series.label,
-            _trend_cell(metric_key, series, width=spark_width),
-            latest,
-            peak,
-            _metric_readout(metric_key, series),
+        average = _format_metric_value(series, _series_average(series)) if series.values else "—"
+        minimum = _format_metric_value(series, min(series.values)) if series.values else "—"
+
+        chart_text = _vertical_chart(metric_key, series, width=chart_width)
+        details_text = (
+            f"[bold]Latest:[/bold] {latest}    "
+            f"[bold]Peak:[/bold] {peak}    "
+            f"[bold]Average:[/bold] {average}    "
+            f"[bold]Min:[/bold] {minimum}\n"
+            f"[bold]Readout:[/bold] {_metric_readout(metric_key, series)}"
         )
 
-    console.print(table)
-    console.print()
+        console.print(Panel(
+            f"{chart_text}\n\n{details_text}",
+            title=f"[bold]{series.label}[/bold]",
+            title_align="left",
+            border_style=_METRIC_COLORS.get(metric_key, "cyan"),
+            expand=True,
+        ))
+        console.print()
