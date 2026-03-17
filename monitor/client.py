@@ -5,6 +5,11 @@ All OpenSearch API calls are centralized here. Each function wraps errors
 and returns structured Python dicts/lists so views never touch raw HTTP.
 """
 
+from __future__ import annotations
+
+
+from typing import Any
+
 import urllib3
 from opensearchpy import OpenSearch
 
@@ -16,8 +21,9 @@ from monitor.config import (
     OPENSEARCH_SSL,
     console,
 )
-
+from monitor.metrics_service import get_metrics_provider
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
 
 def get_os_client() -> OpenSearch:
@@ -57,10 +63,18 @@ def fetch_cluster_stats() -> dict:
 def fetch_node_stats() -> dict:
     """GET /_nodes/stats/os,jvm,fs,indices → per-node CPU, memory, JVM heap, disk, and indexing/search stats."""
     try:
-        client = get_os_client()
-        return client.nodes.stats(metric="os,jvm,fs,indices")
+        return get_metrics_provider().fetch_node_stats(timeframe="real-time")
     except Exception as e:
         console.print(f"[red]Error fetching node stats:[/red] {e}")
+        return {}
+
+
+def fetch_node_stats_for_timeframe(timeframe: str) -> dict[str, Any]:
+    """Route node stats lookup by timeframe using the MetricsProvider."""
+    try:
+        return get_metrics_provider().fetch_node_stats(timeframe=timeframe)
+    except Exception as e:
+        console.print(f"[red]Error fetching node stats for timeframe '{timeframe}':[/red] {e}")
         return {}
 
 
@@ -104,3 +118,16 @@ def fetch_data_streams() -> dict:
     except Exception as e:
         console.print(f"[red]Error fetching data streams:[/red] {e}")
         return {}
+
+
+
+def fetch_bottleneck_metrics(node_name: str) -> dict[str, float | None]:
+    """Fetch Performance Analyzer diagnostics for bottleneck triage."""
+    try:
+        return get_metrics_provider().fetch_performance_analyzer_metrics(node_name=node_name)
+    except Exception as e:
+        console.print(f"[yellow]Unable to fetch diagnostics for '{node_name}':[/yellow] {e}")
+        return {
+            "disk_utilization": None,
+            "io_tot_wait": None,
+        }
