@@ -66,7 +66,7 @@ def collect(client) -> dict[str, dict[str, Any]]:
         # ── CPU (OpenSearch process, not system-wide) ─────────────────────
         cpu_pct: float = node.get("process", {}).get("cpu", {}).get("percent", 0.0)
 
-        # ── JVM Heap (the memory metric that matters for OpenSearch) ───────
+        # ── JVM Heap ─────────────────────
         jvm_mem = node.get("jvm", {}).get("mem", {})
         heap_used = jvm_mem.get("heap_used_in_bytes", 0)
         heap_max  = jvm_mem.get("heap_max_in_bytes", 0)
