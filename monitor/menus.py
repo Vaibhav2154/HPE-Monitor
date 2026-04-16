@@ -11,6 +11,11 @@ from rich.panel import Panel
 from simple_term_menu import TerminalMenu
 
 from monitor.config import console
+from monitor.kafka.views.snapshot import display_snapshot
+from monitor.kafka.views.resource_gauges import display_resource_gauges
+from monitor.kafka.views.consumer_lag import display_consumer_lag
+from monitor.kafka.views.throughput_ratio import display_throughput_ratio
+from monitor.kafka.views.throughput_comparison import display_throughput_comparison
 from monitor.Opensearch.views.quick_summary import display_quick_summary
 from monitor.Opensearch.views.trends import display_trends
 from monitor.Opensearch.views.cluster_health import display_cluster_health
@@ -34,7 +39,7 @@ MENU_HIGHLIGHT_STYLE = ("fg_cyan", "bold")
 
 SERVICE_OPTIONS = [
     "OpenSearch",
-    "Kafka          (coming soon)",
+    "Kafka",
     "Logstash       (coming soon)",
     "---",
     "All Services   (coming soon)",
@@ -68,6 +73,8 @@ def main_service_menu(timeframe: str = "1h", query: str = "*", level: str = None
             sys.exit(0)
         elif choice == 0:
             opensearch_menu(timeframe=timeframe, query=query, level=level, spike_ts=spike_ts)
+        elif choice == 1:
+            kafka_menu()
         elif choice in (2, 3, 4):
             console.print("\n[yellow]⚠  This service is coming soon.[/yellow]")
             press_enter_to_return()
@@ -137,3 +144,46 @@ def opensearch_menu(timeframe: str = "1h", query: str = "*", level: str = None, 
             except Exception as e:
                 console.print(f"\n[red]Error:[/red] {e}")
             press_enter_to_return()
+
+# ──────────────── Kafka Submenu ───────────────────────────
+
+KAFKA_VIEWS = [
+    ("Snapshot  — All 9 Metrics",          display_snapshot),
+    ("Resource Gauges  — CPU / Mem / Disk", display_resource_gauges),
+    ("Consumer Lag Graph",                  display_consumer_lag),
+    ("Throughput Ratio Graph",              display_throughput_ratio),
+    ("Produced vs Consumed",               display_throughput_comparison),
+]
+
+def kafka_menu():
+    while True:
+        console.clear()
+        console.print()
+        console.print(Panel.fit(
+            "[bold yellow]Kafka Monitor[/bold yellow]\n"
+            "[dim]Use arrow keys, Enter to select[/dim]",
+            border_style="yellow",
+        ))
+        console.print()
+
+        menu_options = [label for label, _ in KAFKA_VIEWS] + ["---", "Back to Main Menu"]
+        menu = TerminalMenu(
+            menu_options,
+            menu_cursor=MENU_CURSOR,
+            menu_cursor_style=MENU_CURSOR_STYLE,
+            menu_highlight_style=MENU_HIGHLIGHT_STYLE,
+        )
+        choice = menu.show()
+
+        if choice is None or choice == len(menu_options) - 1:
+            return
+        if menu_options[choice] == "---":
+            continue
+        if choice < len(KAFKA_VIEWS):
+            _, view_fn = KAFKA_VIEWS[choice]
+            console.clear()
+            try:
+                view_fn()
+            except Exception as e:
+                console.print(f"\n[red]Error:[/red] {e}")
+                press_enter_to_return()
