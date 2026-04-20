@@ -86,8 +86,8 @@ def cli(timeframe, source, watch, summary, service, query, level, spike_ts):
         get_metrics_provider().set_history_source_preference(source)
 
     # Handle coming-soon services
-    if service in ("kafka", "logstash"):
-        console.print(f"\n[yellow]⚠  {service.title()} monitoring is coming soon.[/yellow]")
+    if service == "logstash":
+        console.print("\n[yellow]⚠ Logstash monitoring is coming soon.[/yellow]")
         sys.exit(0)
 
     # --summary flag: jump straight to Quick Summary
@@ -139,6 +139,10 @@ def cli(timeframe, source, watch, summary, service, query, level, spike_ts):
         _watch_loop(view_fn, watch, **watch_args)
         return
 
+    if service == "kafka":
+        from monitor.menus import kafka_menu
+        kafka_menu()
+        return
     # Default routing:
     #   --service opensearch   → go directly to the OpenSearch menu
     #   no --service flag      → show the top-level service selector
@@ -147,6 +151,7 @@ def cli(timeframe, source, watch, summary, service, query, level, spike_ts):
     else:
         main_service_menu(timeframe=timeframe, query=query, level=level, spike_ts=spike_ts)
 
+    
 
 def _watch_loop(view_fn, interval: int, **kwargs):
     """
